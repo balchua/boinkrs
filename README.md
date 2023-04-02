@@ -1,6 +1,6 @@
 # Boink in Rust
 
-This is a port of Boink
+This is a port of Boink to Rust.
 
 ## Build requirements
 

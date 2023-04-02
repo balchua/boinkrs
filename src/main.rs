@@ -1,8 +1,11 @@
 use clap::{Parser, Subcommand};
+use env_logger::init as log_init;
+use log::debug;
 
 pub mod handler;
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
+    log_init();
     let args = Arguments::parse();
     handler::process(&args).await
 }
@@ -28,4 +31,30 @@ enum Command {
         #[arg(short, long, required = true)]
         namespace: String,
     },
+}
+
+impl Arguments {
+    pub fn is_stop_action(&self) -> bool {
+        match &self.cmd {
+            Command::Start { namespace: _ } => {
+                debug!("start action selected");
+                return false;
+            }
+            Command::Stop { namespace: _ } => {
+                debug!("stop action selected");
+                return true;
+            }
+        }
+    }
+
+    pub fn get_namespace(&self) -> &String {
+        match &self.cmd {
+            Command::Start { namespace } => {
+                return &namespace;
+            }
+            Command::Stop { namespace } => {
+                return &namespace;
+            }
+        }
+    }
 }
