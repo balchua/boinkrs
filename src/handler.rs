@@ -2,14 +2,12 @@ use std::collections::BTreeMap;
 
 use crate::Arguments;
 use k8s_openapi::{api::apps::v1::Deployment, serde_json};
-use log::{debug, error, info, warn};
+use log::{debug, info};
 
 use kube::{
     api::{Api, ListParams, Patch, PatchParams, ResourceExt},
     core::ObjectList,
-    //runtime::wait::{await_condition, conditions::is_pod_running},
-    Client,
-    Error,
+    Client, Error,
 };
 
 pub async fn process(args: &Arguments) -> anyhow::Result<()> {
@@ -18,17 +16,20 @@ pub async fn process(args: &Arguments) -> anyhow::Result<()> {
     let client = Client::try_default().await?;
     let dep_client: Api<Deployment> = Api::namespaced(client, ns);
 
-    let deployments = find_deployments(&dep_client);
+    let deployments = find_deployments(&dep_client, &args);
     for dep in deployments.await? {
-        debug!("Deployment[{}] is found", dep.name_any());
+        info!("Deployment[{}] is found", dep.name_any());
         scale(&dep_client, &dep, args).await?;
     }
     Ok(())
 }
 
-async fn find_deployments(dep_client: &Api<Deployment>) -> Result<ObjectList<Deployment>, Error> {
-    //let lp = ListParams::default().fields(&format!("metadata.name={}", "norse")); // only want results for our pod
-    let lp = ListParams::default();
+async fn find_deployments(
+    dep_client: &Api<Deployment>,
+    args: &Arguments,
+) -> Result<ObjectList<Deployment>, Error> {
+    let lp = ListParams::default().labels(&args.label); // only want results for our pod
+                                                        //let lp = ListParams::default();
     let deps = dep_client.list(&lp).await?;
     return Ok(deps);
 }
@@ -105,6 +106,7 @@ async fn scale_up(dep_client: &Api<Deployment>, deployment: &Deployment) -> Resu
     debug!("Resulting deployment {:?}", out.spec);
     Ok(())
 }
+
 async fn scale(
     dep_client: &Api<Deployment>,
     deployment: &Deployment,

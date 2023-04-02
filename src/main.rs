@@ -13,6 +13,8 @@ async fn main() -> anyhow::Result<()> {
 /// Simple program to start or stop a deployment
 #[derive(Parser, Debug)]
 pub struct Arguments {
+    #[clap(short, long)]
+    label: String,
     #[clap(subcommand)]
     cmd: Command,
 }
