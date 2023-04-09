@@ -144,14 +144,45 @@ mod test {
     use kube::{core::ObjectList, Api, Client};
 
     use http::{Request, Response};
-    use hyper::Body;
+    use hyper::{Body, Method};
     use k8s_openapi::{api::apps::v1::Deployment, http, serde_json};
     use tower_test::mock::{self, Handle};
 
-    use crate::{handler::find_deployments, Arguments, Command};
+    use crate::{
+        handler::{find_deployments, scale_up},
+        Arguments, Command,
+    };
+
+    async fn patch_deployment(handle: &mut Handle<Request<Body>, Response<Body>>) {
+        let (request, send) = handle.next_request().await.expect("Service not called");
+
+        let (parts, _body) = request.into_parts();
+        println!("path is {}, method is {}", parts.uri.path(), parts.method);
+        let body = match (parts.method, parts.uri.path()) {
+            (Method::PATCH, "/apis/apps/v1/namespaces/default/deployments/test") => {
+                // Can also use recorded resources by reading from a file.
+                // Or create entire mock from some file mapping routes to resources.
+                let deployment: ObjectList<Deployment> = serde_json::from_value(serde_json::json!(
+                {
+                    "kind": "DeploymentList",
+                    "apiVersion": "apps/v1",
+                    "metadata": {
+                      "resourceVersion": "208553"
+                    },
+                    "items": [],
+                }))
+                .unwrap();
+                serde_json::to_vec(&deployment).unwrap()
+            }
+            _ => panic!("Unexpected API request {:?}", parts.uri.path()),
+        };
+
+        send.send_response(Response::builder().body(Body::from(body)).unwrap());
+    }
 
     async fn mock_get_deployment_with_labels(handle: &mut Handle<Request<Body>, Response<Body>>) {
         let (request, send) = handle.next_request().await.expect("Service not called");
+
         let body = match (
             request.method().as_str(),
             request.uri().to_string().as_str(),
@@ -277,6 +308,68 @@ mod test {
 
         let lists = deps.await.unwrap();
         assert_eq!(0, lists.items.len());
+        spawned.await.unwrap();
+    }
+    #[tokio::test]
+    async fn must_scale_deployment() {
+        let (mock_service, mut handle) = mock::pair::<Request<Body>, Response<Body>>();
+
+        let spawned = tokio::spawn(async move {
+            patch_deployment(&mut handle).await;
+        });
+
+        let deployments: Api<Deployment> =
+            Api::default_namespaced(Client::new(mock_service, "default"));
+
+        let d: Deployment = serde_json::from_value(serde_json::json!(
+            {
+                "apiVersion": "apps/v1",
+                "kind": "Deployment",
+                "metadata": {
+                    "name": "test",
+                    "annotations": { "kube-rs": "test" },
+                    "labels": {
+                        "app": "nginx"
+                    }
+                },
+                "spec": {
+                    "replicas": 3,
+                    "selector": {
+                        "matchLabels" : {
+                            "app":"nginx"
+                        }
+                    },
+                    "template" : {
+                        "metadata" : {
+                            "labels" : {
+                                "app":"nginx"
+                            }
+                        },
+                    },
+                    "spec":{
+                        "containers":[
+                            {
+                                "name":"ngnix",
+                                "image":"nginx:1.7.9",
+                                "ports":[
+                                {
+                                    "containerPort": 80
+                                }
+                                ]
+                            }
+                        ]
+                    },
+                }
+        }))
+        .unwrap();
+
+        let res = scale_up(&deployments, &d);
+
+        let response = res.await.unwrap();
+
+        match response {
+            () => assert!(true),
+        }
         spawned.await.unwrap();
     }
 }
